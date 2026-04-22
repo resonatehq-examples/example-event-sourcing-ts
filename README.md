@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/banner.png" alt="Event Sourcing — Resonate example" />
+</p>
+
 # Event Sourcing / CQRS Lite
 
 Durable event stream processing with crash recovery. Processes a sequence of domain events into a state projection — one durable checkpoint per event. If the projection writer crashes at event 5, events 0–4 are cached. Processing resumes at event 5. No event is applied twice.
