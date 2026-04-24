@@ -54,27 +54,9 @@ OrderCancelled       → ord_002 moves active → cancelled count
 SubscriptionRenewed  → renewals counter incremented
 ```
 
-### Restate Comparison
+### Why the loop is the processor
 
-Restate handles event processing via Virtual Objects with per-key serialization. The `eventtransactions` example processes social media posts per user:
-
-```typescript
-// Restate: event processing via Virtual Object
-const userFeed = restate.object({
-  name: "userFeed",
-  handlers: {
-    processPost: async (ctx: restate.ObjectContext, post: Post) => {
-      const postId = await ctx.run(() => createPost(userId, post));
-      while ((await ctx.run(() => getPostStatus(postId))) === PENDING) {
-        await ctx.sleep({ seconds: 5 });
-      }
-      await ctx.run(() => updateUserFeed(userId, postId));
-    },
-  },
-});
-```
-
-Resonate's approach: a sequential generator with `yield*` per event. No object declaration, no Kafka handler wiring. The loop IS the event processor.
+There is no external event-routing layer for this example. Events arrive as an array; the generator iterates; each event gets one `yield*` call that returns a checkpointed result. The workflow itself IS the processor. For Kafka-sourced events where the broker routes per-key to a handler, see `example-openai-deep-research-agent-kafka-ts`.
 
 ## Prerequisites
 
@@ -167,20 +149,12 @@ example-event-sourcing-ts/
 
 **Lines of code**: ~402 total (including 8 event type definitions), ~25 lines of event processing logic (workflow.ts minus comments).
 
-## Comparison
+## Exactly-once via the promise store
 
-| | Resonate | Restate | Kafka + Flink |
-|---|---|---|---|
-| Checkpoint mechanism | `ctx.run()` per event | Virtual Object state + Kafka | Checkpoint intervals + offset commit |
-| Exactly-once guarantee | Promise store deduplication | Transactional handler + journal | At-least-once + idempotent sink |
-| Event processing code | ~25 LOC | ~40 LOC | ~100 LOC + connector config |
-| Infrastructure | None | Restate server | Kafka cluster + Flink cluster |
-| Resume on crash | From last checkpointed event | From last committed offset | From last checkpoint |
+Each `ctx.run(event)` call registers a durable promise keyed by event ID. A second invocation with the same event ID returns the cached result — the event's side effects run exactly once across the entire lifetime of the workflow, including across crashes and restarts. No separate idempotency table, no broker-side deduplication, no "checkpoint interval" to tune.
 
-The main difference from Restate's approach: Restate's `eventtransactions` pattern uses a Virtual Object where Kafka routes events to the correct per-user handler, with per-key serialization provided by the Virtual Object guarantee. Resonate's approach works differently — the workflow itself IS the processor, and you bring your own event queue (the events array). For Kafka-sourced events, see `example-openai-deep-research-agent-kafka-ts`.
+Resume-from-crash is automatic: the generator replays from the top on restart, each `yield*` short-circuits on completed events, and execution resumes at the first unprocessed event.
 
 ## Learn More
 
 - [Resonate documentation](https://docs.resonatehq.io)
-- [Restate event transactions (Kafka + Virtual Object)](https://github.com/restatedev/examples/tree/main/typescript/patterns-use-cases/src/eventtransactions)
-- [Restate event enrichment (digital twin pattern)](https://github.com/restatedev/examples/tree/main/typescript/patterns-use-cases/src/eventenrichment)
